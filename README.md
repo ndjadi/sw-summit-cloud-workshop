@@ -236,7 +236,13 @@ Go to Kibana and display the dashboard.
 You'll need to deploy the stack described in "**stack/sw-stack.yml**". This CloudFormation template deploy all the components described in our architecture. All you need to provide is the S3 bucket ARN in which you would like to backup your data.
 You can deploy the CloudFormation template either from the AWS Console, or using the AWS CLI :
 
+#### 1. Configure your AWS CLI
+Follow this guide https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html in order to configure your AWS CLI with the correct settings (credentials, region).
+
+#### 2. Deploy the CloudFormation Template :
+Simply execute the following command :
 ```
 aws cloudformation create-stack --template-url https://customers-shared-files-nd.s3-eu-west-1.amazonaws.com/sierrawireless/stack/sw-stack.yml --stack-name my-new-stack-name --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
 ```
-
+#### 3. Start the Kinesis Data Analytics application :
+Navigate to Amazon Kinesis in the AWS Console and start the "**sw-kinesis-data-analytics**" application.
