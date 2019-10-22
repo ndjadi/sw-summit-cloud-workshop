@@ -29,6 +29,69 @@ Here is an example of the payload data that it is expected from the application 
 ```
 Please make sure to configure the appropriate edge and cloud action in Octave to send data in the format described above to AWS. During the workshop, a high frequency (every 2 seconds) is recommended. (This will speed up the Random Cut Forest Algorithm learning phase)
 
+### On Octave
+#### 1. Create an Edge action :
+An edge action to aggregate different observations in the same event is required.
+Here's a code sample :
+```javascript
+function(event) {
+    // Reads a value from the light sensor right away
+    var light = Datahub.read("/redSensor/light/value", 0);
+    light = light ? light.value : null;
+
+    // reading a new value from the accelerometer sensor
+    var accel = Datahub.read("/redSensor/accel/value", 0);
+    accel = accel ? accel.value : null;
+    // reading value from the temperature sensor
+    var temp = Datahub.read("/redSensor/imu/temp/value", 0);
+    temp = temp ? temp.value : null;
+    return {
+      // Sends immediately to the cloud, into stream "/company/devices/device/:default")
+      "cl://" : [{
+        light: light,
+        accel: accel,
+        temp: temp
+      }],
+  }
+}
+```
+
+#### 2. Create a cloud action to send the events to AWS :
+The cloud action will be responsible for relaying the data to AWS.
+Here's a code sample :
+```javascript
+function(event) {
+  var deviceId = event.path.split("/")[3];
+  var location = event.location.lat.toString() + "," + event.location.lon.toString();
+  var payload = {
+    "Data": {
+      "deviceId": deviceId.toString(),
+      "light": event.elems.light,
+      "accel": event.elems.accel,
+      "temp": event.elems.temp,
+      "location": location,
+      "creationDate": event.creationDate,
+      "generatedDate": event.generatedDate
+    },
+    "PartitionKey": 1
+  };
+  var putBody = JSON.stringify(payload);
+  var putHeaders = {
+    'Content-Type': 'application/json'
+  };
+  // update the url with your own service
+  var result = Octave.Http.put('<replace_with_your_endpoint>/streams/sw-stream/record', putHeaders, putBody);
+  var new_event = {
+    "elems": result
+  };
+
+  return {
+    "<replace_with_your_stream": [new_event],
+  }
+}
+```
+
+
 
 ## Architecture
 
@@ -166,8 +229,20 @@ The Kinesis Data Firehose delivery stream will send data to ElasticSearch in nea
 **DESTINATION_SQL_STREAM** should be sent to a Kinesis Data Firehose delivery stream created in step 5.
 **ALERTING_SQL_STREAM** should be sent to the "**sw-lambda-notification**" Lambda function (to fire alerts)
 
-#### 7. Vizualisation :
+#### 7. Visualization :
 Go to Kibana and display the dashboard.
 
 ### ...On your own
-Please follow this guide
+You'll need to deploy the stack described in "**stack/sw-stack.yml**". This CloudFormation template deploy all the components described in our architecture. All you need to provide is the S3 bucket ARN in which you would like to backup your data.
+You can deploy the CloudFormation template either from the AWS Console, or using the AWS CLI :
+
+#### 1. Configure your AWS CLI
+Follow this guide https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html in order to configure your AWS CLI with the correct settings (credentials, region).
+
+#### 2. Deploy the CloudFormation Template :
+Simply execute the following command :
+```
+aws cloudformation create-stack --template-url https://customers-shared-files-nd.s3-eu-west-1.amazonaws.com/sierrawireless/stack/sw-stack.yml --stack-name my-new-stack-name --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+```
+#### 3. Start the Kinesis Data Analytics application :
+Navigate to Amazon Kinesis in the AWS Console and start the "**sw-kinesis-data-analytics**" application.
