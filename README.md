@@ -5,7 +5,7 @@ Build a solution that performs anomaly detection and data visualization of senso
 
 ## Architecture
 
-![Image description](stack/sw-architecture.png)
+![Image description](stack/sw-architecture-diagram.png)
 
 
 ## Step by step guide
