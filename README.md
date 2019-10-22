@@ -29,6 +29,69 @@ Here is an example of the payload data that it is expected from the application 
 ```
 Please make sure to configure the appropriate edge and cloud action in Octave to send data in the format described above to AWS. During the workshop, a high frequency (every 2 seconds) is recommended. (This will speed up the Random Cut Forest Algorithm learning phase)
 
+### On Octave
+#### 1. Create an Edge action :
+An edge action to aggregate different observation in the same event is required.
+Here's a code sample :
+```javascript
+function(event) {
+    // Reads a value from the light sensor right away
+    var light = Datahub.read("/redSensor/light/value", 0);
+    light = light ? light.value : null;
+
+    // reading a new value from the accelerometer sensor
+    var accel = Datahub.read("/redSensor/accel/value", 0);
+    accel = accel ? accel.value : null;
+    // reading value from the temperature sensor
+    var temp = Datahub.read("/redSensor/imu/temp/value", 0);
+    temp = temp ? temp.value : null;
+    return {
+      // Sends immediately to the cloud, into stream "/company/devices/device/:default")
+      "cl://" : [{
+        light: light,
+        accel: accel,
+        temp: temp
+      }],
+  }
+}
+```
+
+#### 2. Create a cloud action to send the events to AWS :
+The cloud action will be responsible for relaying the data to AWS.
+Here's a code sample :
+```javascript
+function(event) {
+  var deviceId = event.path.split("/")[3];
+  var location = event.location.lat.toString() + "," + event.location.lon.toString();
+  var payload = {
+    "Data": {
+      "deviceId": deviceId.toString(),
+      "light": event.elems.light,
+      "accel": event.elems.accel,
+      "temp": event.elems.temp,
+      "location": location,
+      "creationDate": event.creationDate,
+      "generatedDate": event.generatedDate
+    },
+    "PartitionKey": 1
+  };
+  var putBody = JSON.stringify(payload);
+  var putHeaders = {
+    'Content-Type': 'application/json'
+  };
+  // update the url with your own service
+  var result = Octave.Http.put('<replace_with_your_endpoint>/streams/sw-stream/record', putHeaders, putBody);
+  var new_event = {
+    "elems": result
+  };
+
+  return {
+    "<replace_with_your_stream": [new_event],
+  }
+}
+```
+
+
 
 ## Architecture
 
