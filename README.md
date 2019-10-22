@@ -218,7 +218,7 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     TIMESTAMP_TO_CHAR('yyyy-MM-dd', "generated_date")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', "generated_date"),
     "ANOMALY_SCORE"
     FROM "TEMP_STREAM"
-    WHERE "ANOMALY_SCORE" > 5;
+    WHERE "ANOMALY_SCORE" > 4;
 
 ```
 
