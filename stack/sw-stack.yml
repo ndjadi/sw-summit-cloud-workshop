@@ -1,0 +1,557 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: AWS backend stack
+Resources:
+  SWKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties: 
+      Name: sw-stream
+      RetentionPeriodHours: 24
+      ShardCount: 1
+  SWSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: sw-notification-topic
+      TopicName: sw-notification-topic
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'sw-backup-bucket-${AWS::Region}-${AWS::AccountId}'
+  SWElasticSearch:
+    Type: AWS::Elasticsearch::Domain
+    Properties: 
+      AccessPolicies:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: '*'
+          Action:
+          - 'es:ESHttp*'
+          Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/sw-elasticsearch/*'
+          Condition:
+            IpAddress:
+              aws:SourceIp: ["77.203.220.160/30"]  # Parameterize 
+      DomainName: sw-elasticsearch
+      ElasticsearchClusterConfig: 
+        InstanceCount: "1"
+        InstanceType: "m4.large.elasticsearch"
+        DedicatedMasterEnabled: false
+        ZoneAwarenessEnabled: false
+      ElasticsearchVersion: "7.1"
+      EBSOptions:
+          EBSEnabled: true
+          VolumeSize: 10
+          VolumeType: "gp2"
+  APIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: 'sts:AssumeRole'
+  APIPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref APIRole
+      PolicyName: api_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'kinesis:*'
+            Resource:
+              - !GetAtt SWKinesisStream.Arn
+  DeliveryApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod #!Ref ApiStageName
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "Kinesis API"
+        schemes: ["https"]
+        paths:
+          /streams/{stream-name}/record:
+            put:
+              consumes: ["application/json"]
+              produces: ["application/json"]
+              responses:
+                "200":
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/Empty"
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt APIRole.Arn
+                responses:
+                  default:
+                    statusCode: "200"
+                requestParameters:
+                  integration.request.header.Content-Type: "'application/x-amz-json-1.1'"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:kinesis:action/PutRecord"
+                passthroughBehavior: "when_no_templates"
+                httpMethod: "POST"
+                requestTemplates:
+                  application/json: !Sub >
+                    {
+                      "StreamName": "$input.params('stream-name')",
+                      "Data": "$util.base64Encode($input.json('$.Data'))",
+                      "PartitionKey": "$input.path('$.PartitionKey')"
+                    }
+                type: "aws"
+            options:
+              consumes: ["application/json"]
+              produces: ["application/json"]
+              responses:
+                "200":
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/Empty"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                type: "mock"
+        definitions:
+          Empty:
+            type: "object"
+            title: "Empty Schema"
+#######################################
+  # LambdaTransformerRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         -
+  #           Effect: "Allow"
+  #           Principal:
+  #             Service:
+  #               - "lambda.amazonaws.com"
+  #           Action:
+  #             - "sts:AssumeRole"
+  #     Policies:
+  #       -
+  #         PolicyName: "TransformerLogCreationPolicy"
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             -
+  #               Effect: "Allow"
+  #               Action: 
+  #                 - "logs:CreateLogGroup"
+  #               Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+  #       -
+  #         PolicyName: "TransformerLogGenerationPolicy"
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             -
+  #               Effect: "Allow"
+  #               Action:
+  #                 - "logs:CreateLogStream"
+  #                 - "logs:PutLogEvents"
+  #               Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sw-lambda-transformer:*"
+  #     Path: "/service-role/"
+  #     RoleName: "sw-lambda-transformer-role"
+#######################################
+  LambdaNotificationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSNSFullAccess"
+      Policies:
+        -
+          PolicyName: "NotificationLogCreationPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+        -
+          PolicyName: "NotificationLogGenerationPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sw-lambda-notification:*"
+        
+      Path: "/service-role/"
+      RoleName: "sw-lambda-notification-role"
+#############################
+  KinesisDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "firehose.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: "KinesisDeliveryPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "s3:*"
+                Resource:
+                  - !GetAtt S3Bucket.Arn #"arn:aws:s3:::customers-shared-files-nd-sw"     # parameterize
+                  - !Join ["/", [!GetAtt S3Bucket.Arn, "*"]] #"arn:aws:s3:::customers-shared-files-nd-sw/*"     # parameterize
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "lambda:InvokeFunction"
+                  - "lambda:GetFunctionConfiguration"
+                Resource: !Join ["", [!GetAtt SWLambdaNotification.Arn, "*"]]
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "es:DescribeElasticsearchDomain"
+                  - "es:DescribeElasticsearchDomains"
+                  - "es:DescribeElasticsearchDomainConfig"
+                  - "es:ESHttpPost"
+                  - "es:ESHttpPut"
+                  - "es:ESHttpGet"
+                Resource:
+                  - !GetAtt SWElasticSearch.Arn
+                  - !Join ["/", [!GetAtt SWElasticSearch.Arn, "*"]]
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/sw-firehose-delivery:log-stream:*"
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "kinesis:DescribeStream"
+                  - "kinesis:GetShardIterator"
+                  - "kinesis:GetRecords"
+                Resource: !GetAtt SWKinesisStream.Arn
+              -
+                Effect: "Allow"
+                Action: 
+                  - "kms:Decrypt"
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/%SSE_KEY_ID%"
+      Path: "/"
+      RoleName: "sw-kinesis-delivery-role"
+  ##########################
+  KinesisAnalyticsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "kinesisanalytics.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: "KinesisAnalyticsPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: "ReadInputKinesis"
+                Effect: "Allow"
+                Action: 
+                  - "kinesis:DescribeStream"
+                  - "kinesis:GetShardIterator"
+                  - "kinesis:GetRecords"
+                Resource: !GetAtt SWKinesisStream.Arn
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "lambda:InvokeFunction"
+                  - "lambda:GetFunctionConfiguration"
+                Resource: 
+                  - !Join ["", [!GetAtt SWLambdaNotification.Arn, "*"]]
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "firehose:*"
+                Resource: 
+                  - !GetAtt SWKinesisDeliveryStream.Arn
+      Path: "/"
+      RoleName: "sw-kinesis-analytics-role"
+
+  ##########################
+  SWKinesisDeliveryStream: 
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: sw-firehose-delivery
+      DeliveryStreamType: DirectPut
+      # KinesisStreamSourceConfiguration:
+      #   KinesisStreamARN: !GetAtt SWKinesisStream.Arn
+      #   RoleARN: !GetAtt KinesisDeliveryRole.Arn
+      ElasticsearchDestinationConfiguration: 
+        BufferingHints: 
+          IntervalInSeconds: 60   #To parameterize
+          SizeInMBs: 1
+        CloudWatchLoggingOptions: 
+          Enabled: false
+        DomainARN: !GetAtt SWElasticSearch.Arn
+        IndexName: "mangoh"
+        IndexRotationPeriod: "NoRotation"
+        TypeName: ""
+        RetryOptions: 
+          DurationInSeconds: 60
+        RoleARN: !GetAtt KinesisDeliveryRole.Arn
+        ProcessingConfiguration:
+          Enabled: false
+          # Processors:
+          #   - Parameters:
+          #       - ParameterName: LambdaArn
+          #         ParameterValue: !GetAtt SWLambdaNotification.Arn 
+          #     Type: Lambda 
+        S3BackupMode: "AllDocuments"
+        S3Configuration: 
+          BucketARN: !GetAtt S3Bucket.Arn  # To parameterize
+          BufferingHints: 
+            IntervalInSeconds: 60
+            SizeInMBs: 1
+          CompressionFormat: "UNCOMPRESSED"
+          Prefix: "sw-light/"
+          RoleARN: !GetAtt KinesisDeliveryRole.Arn
+          CloudWatchLoggingOptions: 
+            Enabled: false
+  SWLambdaNotification:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: sw-lambda-notification
+      Handler: index.handler
+      Runtime: nodejs8.10
+      InlineCode: " console.log('Loading function');\n
+                    var AWS = require('aws-sdk');\n
+                    var sns = new AWS.SNS();\n
+                    exports.handler = (event, context, callback) => {\n
+                        \t/* Process the list of records and transform them here if necessary*/\n
+                        \tconst output = event.records.map((record) => {\n
+                            \t\tconsole.log(record.recordId);\n
+                            \t\tconst payload =JSON.parse((Buffer.from(record.data, 'base64').toString()))\n
+                            \t\t/* Configure alert threshold here */\n
+                            \t\tif(payload.ANOMALY_SCORE > 3){\n
+                              \t\t\tvar params = {\n
+                                \t\t\t\tMessage: ('Something might be wrong with ' + payload.deviceId.toString()) ,\n
+                                \t\t\t\tSubject: 'Device Alarm',\n
+                                \t\t\t\tTopicArn: 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:sw-notification-topic'\n
+                              \t\t\t};\n
+                              \t\t\tsns.publish(params, context.done);\n
+                            \t\t};\n
+                                \n
+                            \t\treturn{\n
+                                \t\t\trecordId: record.recordId,\n
+                                \t\t\tresult: 'Ok',\n
+                                \t\t\tdata: record.data,\n
+                            \t\t};\n
+                        \t});\n
+                        \tconsole.log(`Processing completed.  Successful records ${output.length}.`);\n
+                        \tcallback(null, { records: output });\n
+                    };"
+      MemorySize: 128
+      Timeout: 3
+      Role: !GetAtt LambdaNotificationRole.Arn
+  SWKinesisDataAnalyticsApplication:
+    Type: "AWS::KinesisAnalytics::Application"
+    Properties:
+      ApplicationName: sw-kinesis-data-analytics
+      ApplicationCode: "
+                        CREATE OR REPLACE STREAM \"TEMP_STREAM\" (\n
+                          \"device_id\"      VARCHAR(32),\n
+                          \"creation_date\"  TIMESTAMP,\n
+                          \"generated_date\"  TIMESTAMP,\n
+                          \"light_sensor\"   INTEGER,\n
+                          \"acc_x\" DOUBLE,\n
+                          \"acc_y\" DOUBLE,\n
+                          \"acc_z\" DOUBLE,\n
+                          \"temp_sensor\" DOUBLE,\n
+                          \"location\" VARCHAR(128),\n
+                          \"ANOMALY_SCORE\"  DOUBLE,\n
+                          \"ANOMALY_EXPLANATION\" VARCHAR(20480));\n
+                          -- Creates an output stream and defines a schema\n
+                          CREATE OR REPLACE STREAM \"DESTINATION_SQL_STREAM\" (\n
+                          \"device_id\"      VARCHAR(32),\n
+                          \"creation_date\"  VARCHAR(20),\n
+                          \"generated_date\"  VARCHAR(20),\n
+                          \"light_sensor\"   INTEGER,\n
+                          \"acc_x\" DOUBLE,\n
+                          \"acc_y\" DOUBLE,\n
+                          \"acc_z\" DOUBLE,\n
+                          \"temp_sensor\" DOUBLE,\n
+                          \"location\" VARCHAR(128),\n
+                          \"ANOMALY_SCORE\"  DOUBLE,\n
+                          \"ANOMALY_EXPLANATION\" VARCHAR(20480));\n
+                          \n
+                          -- Compute an anomaly score for each record in the source stream\n
+                          -- using Random Cut Forest\n
+                          CREATE OR REPLACE PUMP \"STREAM_PUMP\" AS INSERT INTO \"TEMP_STREAM\"\n
+                          SELECT STREAM\n
+                              \"deviceId\" as \"device_id\",\n 
+                              \"creationDate\" as \"creation_date\",\n 
+                              \"generatedDate\" as \"generated_date\",\n 
+                              \"light\" as \"light_sensor\",\n
+                              \"x\" as \"acc_x\",\n
+                              \"y\" as \"acc_y\",\n
+                              \"z\" as \"acc_z\",\n
+                              \"temp\" as \"temp_sensor\",\n
+                              \"location\",\n
+                              \"ANOMALY_SCORE\",\n
+                              \"ANOMALY_EXPLANATION\" FROM TABLE(RANDOM_CUT_FOREST_WITH_EXPLANATION(CURSOR(\n
+                                  SELECT STREAM \n
+                                  \"deviceId\",\n
+                                  TO_TIMESTAMP(\"creationDate\") as \"creationDate\",\n
+                                  TO_TIMESTAMP(\"generatedDate\") as \"generatedDate\",\n
+                                  \"light\",\n
+                                  \"x\",\n
+                                  \"y\",\n
+                                  \"z\",\n
+                                  \"temp\",\n
+                                  \"location\"\n
+                                  FROM \"SOURCE_SQL_STREAM_001\"), 10, 256, 10000, 10, true));\n
+                                  
+                          -- Sort records by descending anomaly score, insert into output stream\n
+                          CREATE OR REPLACE PUMP \"OUTPUT_PUMP\" AS INSERT INTO \"DESTINATION_SQL_STREAM\"\n
+                          SELECT STREAM\n
+                              \"device_id\",\n
+                              TIMESTAMP_TO_CHAR('yyyy-MM-dd', \"creation_date\")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', \"creation_date\"),\n
+                              TIMESTAMP_TO_CHAR('yyyy-MM-dd', \"generated_date\")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', \"generated_date\"),\n
+                              \"light_sensor\",\n
+                              \"acc_x\",\n
+                              \"acc_y\",\n
+                              \"acc_z\",\n
+                              \"temp_sensor\",\n
+                              \"location\",\n
+                              \"ANOMALY_SCORE\", \n
+                              \"ANOMALY_EXPLANATION\"\n
+                          FROM \"TEMP_STREAM\"\n
+                          ORDER BY FLOOR(\"TEMP_STREAM\".ROWTIME TO SECOND), ANOMALY_SCORE DESC;\n
+                        "
+      Inputs:
+        - NamePrefix: "SOURCE_SQL_STREAM"
+          # InputProcessingConfiguration:
+          #   InputLambdaProcessor:
+          #     ResourceARN: !GetAtt SWLambdaTransformer.Arn 
+          #     RoleARN: !GetAtt KinesisAnalyticsRole.Arn
+          InputSchema:
+            RecordColumns:
+            - Name: "deviceId"
+              SqlType: "VARCHAR(32)"
+              Mapping: "$.deviceId"
+            - Name: "light"
+              SqlType: "INTEGER"
+              Mapping: "$.light"
+            - Name: "x"
+              SqlType: "DOUBLE"
+              Mapping: "$.accel.x"
+            - Name: "y"
+              SqlType: "DOUBLE"
+              Mapping: "$.accel.y"
+            - Name: "z"
+              SqlType: "DOUBLE"
+              Mapping: "$.accel.z"
+            - Name: "temp"
+              SqlType: "DOUBLE"
+              Mapping: "$.temp"
+            - Name: "location"
+              SqlType: "VARCHAR(128)"
+              Mapping: "$.location"
+            - Name: "creationDate"
+              SqlType: "BIGINT"
+              Mapping: "$.creationDate"
+            - Name: "generatedDate"
+              SqlType: "BIGINT"
+              Mapping: "$.generatedDate"
+            RecordFormat:
+              RecordFormatType: "JSON"
+              MappingParameters:
+                JSONMappingParameters:
+                  RecordRowPath: "$"
+            RecordEncoding: "UTF-8"
+          KinesisStreamsInput:
+            ResourceARN: !GetAtt SWKinesisStream.Arn
+            RoleARN: !GetAtt KinesisAnalyticsRole.Arn
+  SWKinesisDataAnalyticsApplicationOutput:
+    Type: "AWS::KinesisAnalytics::ApplicationOutput"
+    DependsOn: SWKinesisDataAnalyticsApplication
+    Properties:
+      ApplicationName: !Ref SWKinesisDataAnalyticsApplication
+      Output:
+        DestinationSchema:
+          RecordFormatType: "JSON"
+        KinesisFirehoseOutput:
+          ResourceARN: !GetAtt SWKinesisDeliveryStream.Arn
+          RoleARN: !GetAtt KinesisAnalyticsRole.Arn
+        Name : "DESTINATION_SQL_STREAM"
+  SWKinesisDataAnalyticsNotificationOutput:
+    Type: "AWS::KinesisAnalytics::ApplicationOutput"
+    DependsOn: SWKinesisDataAnalyticsApplication
+    Properties:
+      ApplicationName: !Ref SWKinesisDataAnalyticsApplication
+      Output:
+        DestinationSchema:
+          RecordFormatType: "JSON"
+        LambdaOutput:
+          ResourceARN: !GetAtt SWLambdaNotification.Arn
+          RoleARN: !GetAtt KinesisAnalyticsRole.Arn
+        Name : "DESTINATION_SQL_STREAM"
+Outputs:
+  ProdDataEndpoint:
+    Description: "API Prod stage endpoint"
+    Value: !Sub "https://${DeliveryApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
