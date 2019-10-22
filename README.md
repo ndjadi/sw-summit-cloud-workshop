@@ -31,7 +31,7 @@ Please make sure to configure the appropriate edge and cloud action in Octave to
 
 ### On Octave
 #### 1. Create an Edge action :
-An edge action to aggregate different observation in the same event is required.
+An edge action to aggregate different observations in the same event is required.
 Here's a code sample :
 ```javascript
 function(event) {
