@@ -97,7 +97,7 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     "ANOMALY_SCORE"  DOUBLE,
     "ANOMALY_EXPLANATION" VARCHAR(20480));
     
-  -- Creates an output stream for the alerting
+ -- Creates an output stream for the alerting
  CREATE OR REPLACE STREAM "ANOMALY_SQL_STREAM" (
     "device_id"      VARCHAR(32),
     "creation_date"  VARCHAR(20),
@@ -131,7 +131,7 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
         "location"
         FROM "SOURCE_SQL_STREAM_001"), 10, 256, 10000, 10, true));
 
--- Sort records by descending anomaly score, insert into output stream
+-- Insert into output stream
  CREATE OR REPLACE PUMP "OUTPUT_PUMP" AS INSERT INTO "DESTINATION_SQL_STREAM"
     SELECT STREAM
     "device_id",
@@ -147,7 +147,7 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     "ANOMALY_EXPLANATION"
     FROM "TEMP_STREAM";
 
--- Sort records by descending anomaly score, insert into output stream
+-- Insert detected anomalies into a separate output stream
  CREATE OR REPLACE PUMP "ALERT_PUMP" AS INSERT INTO "ANOMALY_SQL_STREAM"
     SELECT STREAM
     "device_id",
