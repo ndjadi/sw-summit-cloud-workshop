@@ -68,7 +68,7 @@ Now navigate to Index management, click on saved objects and import the file ela
 
 #### 4. Configure Kinesis Data Analytics :
 Navigate to Kinesis Data Analytics and create a new SQL application.
-Connect it to the "sw-stream" Kinesis Data Stream and use this query :
+Connect it to the "**sw-stream**" Kinesis Data Stream and use this query :
 
 ```sql
 CREATE OR REPLACE STREAM "TEMP_STREAM" (
@@ -155,7 +155,7 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     TIMESTAMP_TO_CHAR('yyyy-MM-dd', "generated_date")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', "generated_date"),
     "ANOMALY_SCORE"
     FROM "TEMP_STREAM"
-    WHERE "ANOMALY_SCORE" > 2;
+    WHERE "ANOMALY_SCORE" > 3;
 
 ```
 
@@ -163,8 +163,8 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
 The Kinesis Data Firehose delivery stream will send data to ElasticSearch in near real-time. It will also dump all the data in an S3 bucket.
 
 #### 6. Send Kinesis Data Analytics output to targets :
-DESTINATION_SQL_STREAM should be sent to a Kinesis Data Firehose delivery stream created in step 5.
-ALERTING_SQL_STREAM should be sent to the "sw-lambda-notification" Lambda function (to fire alerts)
+**DESTINATION_SQL_STREAM** should be sent to a Kinesis Data Firehose delivery stream created in step 5.
+**ALERTING_SQL_STREAM** should be sent to the "**sw-lambda-notification**" Lambda function (to fire alerts)
 
 #### 7. Vizualisation :
 Go to Kibana and display the dashboard.
