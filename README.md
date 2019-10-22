@@ -229,7 +229,7 @@ The Kinesis Data Firehose delivery stream will send data to ElasticSearch in nea
 **DESTINATION_SQL_STREAM** should be sent to a Kinesis Data Firehose delivery stream created in step 5.
 **ALERTING_SQL_STREAM** should be sent to the "**sw-lambda-notification**" Lambda function (to fire alerts)
 
-#### 7. Vizualisation :
+#### 7. Visualization :
 Go to Kibana and display the dashboard.
 
 ### ...On your own
