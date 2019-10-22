@@ -5,7 +5,30 @@ Build a solution that performs anomaly detection and data visualization of senso
 This solution also provide the ability to configure live alerting depending on the anomaly score.
 The sensor data is also backed up in an Amazon S3 bucket for further use.
 
+The anomaly detection relies on the Random Cut Forest algorithm
+
 ## Prerequisites
+Here is an example of the payload data that it is expected from the application :
+```json
+{
+    "Data": {
+      "deviceId": "mangoh_device",
+      "creationDate": 1571735678858,
+      "generatedDate": 1571735677678,
+      "accel": {
+          "x": -0.688896,
+          "y": -0.742716,
+          "z": 9.868196
+      },
+      "light": 146,
+      "temp": 32.457031,
+      "location": "48.875004,2.235794"
+    },
+    "PartitionKey": 1  
+}
+```
+Please make sure to configure the appropriate edge and cloud action in Octave to send data in the format described above to AWS. During the workshop, a high frequency (every 2 seconds) is recommended. (This will speed up the Random Cut Forest Algorithm learning phase.
+
 
 ## Architecture
 
@@ -119,5 +142,16 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     ORDER BY FLOOR("TEMP_STREAM".ROWTIME TO SECOND), ANOMALY_SCORE DESC;
 
 ```
+
+#### 5. Configure a Kinesis Data Firehose delivery stream :
+The Kinesis Data Firehose delivery stream will send data to ElasticSearch in near real-time. It will also dump all the data in an S3 bucket.
+
+#### 6. Send Kinesis Data Analytics output to targets :
+DESTINATION_SQL_STREAM should be sent to a Kinesis Data Firehose delivery stream created in step 5.
+ALERTING_SQL_STREAM should be sent to the "sw-lambda-notification" Lambda function (to fire alerts)
+
+#### 7. Vizualisation :
+Go to Kibana and display the dashboard.
+
 ### ...On your own
 Please follow this guide
