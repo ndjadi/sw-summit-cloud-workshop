@@ -5,7 +5,7 @@ Build a solution that performs anomaly detection and data visualization of senso
 This solution also provide the ability to configure live alerting depending on the anomaly score.
 The sensor data is also backed up in an Amazon S3 bucket for further use.
 
-The anomaly detection relies on the Random Cut Forest algorithm
+The anomaly detection relies on the Random Cut Forest algorithm https://docs.aws.amazon.com/kinesisanalytics/latest/sqlref/sqlrf-random-cut-forest.html
 
 ## Prerequisites
 Here is an example of the payload data that it is expected from the application :
@@ -27,7 +27,7 @@ Here is an example of the payload data that it is expected from the application 
     "PartitionKey": 1  
 }
 ```
-Please make sure to configure the appropriate edge and cloud action in Octave to send data in the format described above to AWS. During the workshop, a high frequency (every 2 seconds) is recommended. (This will speed up the Random Cut Forest Algorithm learning phase.
+Please make sure to configure the appropriate edge and cloud action in Octave to send data in the format described above to AWS. During the workshop, a high frequency (every 2 seconds) is recommended. (This will speed up the Random Cut Forest Algorithm learning phase)
 
 
 ## Architecture
@@ -40,7 +40,7 @@ Please make sure to configure the appropriate edge and cloud action in Octave to
 Some components of the architecture have been deployed ahead of the workshop (in order to save some time).
 We will primarily focus on building The Kinesis Data Analytics and the Kinesis Data firehose components.
 #### 1. Connect to your temporary AWS accounts
-Go to https://dashboard.eventengine.run and enter the hash number you've been provided with and open the AWS Console
+Go to https://dashboard.eventengine.run and enter the hash number you've been provided with and open the AWS Console.
 Welcome to your temporary AWS account.
 #### 2. Retrieve your Amazon API gateway endpoint
 In the AWS console, navigate to CloudFormation. On the deployed stack output, copy the API Gateway endpoint, and make sure you are using this endpoint in your Octave cloud actions to send data to AWS.
@@ -96,7 +96,14 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     "location" VARCHAR(128),
     "ANOMALY_SCORE"  DOUBLE,
     "ANOMALY_EXPLANATION" VARCHAR(20480));
- 
+    
+  -- Creates an output stream for the alerting
+ CREATE OR REPLACE STREAM "ANOMALY_SQL_STREAM" (
+    "device_id"      VARCHAR(32),
+    "creation_date"  VARCHAR(20),
+    "generated_date"  VARCHAR(20),
+    "ANOMALY_SCORE"  DOUBLE);
+    
  -- Compute an anomaly score for each record in the source stream
  -- using Random Cut Forest
  CREATE OR REPLACE PUMP "STREAM_PUMP" AS INSERT INTO "TEMP_STREAM"
@@ -138,8 +145,17 @@ CREATE OR REPLACE STREAM "TEMP_STREAM" (
     "location",
     "ANOMALY_SCORE", 
     "ANOMALY_EXPLANATION"
+    FROM "TEMP_STREAM";
+
+-- Sort records by descending anomaly score, insert into output stream
+ CREATE OR REPLACE PUMP "ALERT_PUMP" AS INSERT INTO "ANOMALY_SQL_STREAM"
+    SELECT STREAM
+    "device_id",
+    TIMESTAMP_TO_CHAR('yyyy-MM-dd', "creation_date")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', "creation_date"),
+    TIMESTAMP_TO_CHAR('yyyy-MM-dd', "generated_date")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', "generated_date"),
+    "ANOMALY_SCORE"
     FROM "TEMP_STREAM"
-    ORDER BY FLOOR("TEMP_STREAM".ROWTIME TO SECOND), ANOMALY_SCORE DESC;
+    WHERE "ANOMALY_SCORE" > 2;
 
 ```
 
