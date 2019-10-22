@@ -32,7 +32,7 @@ Resources:
           Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/sw-elasticsearch/*'
           Condition:
             IpAddress:
-              aws:SourceIp: ["77.203.220.160/30"]  # Parameterize 
+              aws:SourceIp: ["77.197.140.100/30"]  # Parameterize 
       DomainName: sw-elasticsearch
       ElasticsearchClusterConfig: 
         InstanceCount: "1"
@@ -504,7 +504,7 @@ Resources:
                               TIMESTAMP_TO_CHAR('yyyy-MM-dd', \"generated_date\")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', \"generated_date\"),\n
                               \"ANOMALY_SCORE\"\n
                               FROM \"TEMP_STREAM\"\n
-                              WHERE \"ANOMALY_SCORE\" > 2;\n
+                              WHERE \"ANOMALY_SCORE\" > 4;\n
                         "
       Inputs:
         - NamePrefix: "SOURCE_SQL_STREAM"
@@ -562,18 +562,18 @@ Resources:
           ResourceARN: !GetAtt SWKinesisDeliveryStream.Arn
           RoleARN: !GetAtt KinesisAnalyticsRole.Arn
         Name : "DESTINATION_SQL_STREAM"
-  SWKinesisDataAnalyticsNotificationOutput:
-    Type: "AWS::KinesisAnalytics::ApplicationOutput"
-    DependsOn: SWKinesisDataAnalyticsApplication
-    Properties:
-      ApplicationName: !Ref SWKinesisDataAnalyticsApplication
-      Output:
-        DestinationSchema:
-          RecordFormatType: "JSON"
-        LambdaOutput:
-          ResourceARN: !GetAtt SWLambdaNotification.Arn
-          RoleARN: !GetAtt KinesisAnalyticsRole.Arn
-        Name : "ANOMALY_SQL_STREAM"
+  # SWKinesisDataAnalyticsNotificationOutput:
+  #   Type: "AWS::KinesisAnalytics::ApplicationOutput"
+  #   DependsOn: SWKinesisDataAnalyticsApplication
+  #   Properties:
+  #     ApplicationName: !Ref SWKinesisDataAnalyticsApplication
+  #     Output:
+  #       DestinationSchema:
+  #         RecordFormatType: "JSON"
+  #       LambdaOutput:
+  #         ResourceARN: !GetAtt SWLambdaNotification.Arn
+  #         RoleARN: !GetAtt KinesisAnalyticsRole.Arn
+  #       Name : "ANOMALY_SQL_STREAM"
 Outputs:
   ProdDataEndpoint:
     Description: "API Prod stage endpoint"
