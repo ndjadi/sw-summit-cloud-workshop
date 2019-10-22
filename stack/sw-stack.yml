@@ -378,33 +378,41 @@ Resources:
       FunctionName: sw-lambda-notification
       Handler: index.handler
       Runtime: nodejs8.10
-      InlineCode: " console.log('Loading function');\n
-                    var AWS = require('aws-sdk');\n
-                    var sns = new AWS.SNS();\n
-                    exports.handler = (event, context, callback) => {\n
-                        \t/* Process the list of records and transform them here if necessary*/\n
-                        \tconst output = event.records.map((record) => {\n
-                            \t\tconsole.log(record.recordId);\n
-                            \t\tconst payload =JSON.parse((Buffer.from(record.data, 'base64').toString()))\n
-                            \t\t/* Configure alert threshold here */\n
-                            \t\tif(payload.ANOMALY_SCORE > 3){\n
-                              \t\t\tvar params = {\n
-                                \t\t\t\tMessage: ('Something might be wrong with ' + payload.deviceId.toString()) ,\n
-                                \t\t\t\tSubject: 'Device Alarm',\n
-                                \t\t\t\tTopicArn: 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:sw-notification-topic'\n
-                              \t\t\t};\n
-                              \t\t\tsns.publish(params, context.done);\n
-                            \t\t};\n
-                                \n
-                            \t\treturn{\n
-                                \t\t\trecordId: record.recordId,\n
-                                \t\t\tresult: 'Ok',\n
-                                \t\t\tdata: record.data,\n
-                            \t\t};\n
-                        \t});\n
-                        \tconsole.log(`Processing completed.  Successful records ${output.length}.`);\n
-                        \tcallback(null, { records: output });\n
-                    };"
+      InlineCode: !Sub " console.log('Loading function');\n
+                      var AWS = require('aws-sdk');\n
+                      var sns = new AWS.SNS();\n
+                      exports.handler = async (event, context) => {\n
+                          \tlet success = 0;\n
+                          \tlet failure = 0;\n
+                          \tconst output = event.records.map((record) => {\n
+                              \t\t/* Data is base64 encoded, so decode here */\n
+                              \t\tconst payload =Buffer.from(record.data, 'base64').toString();\n
+                              \t\tconst recordData = JSON.parse(payload);\n
+                              \t\tconsole.log(recordData.device_id.toString());\n
+                              \t\ttry {\n
+                                  \t\t\tvar params = {\n
+                                      \t\t\t\tMessage: ('Something might be wrong with ' + recordData.device_id.toString()) ,\n
+                                      \t\t\t\tSubject: 'Device Alarm',\n
+                                      \t\t\t\tTopicArn: 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:sw-notification-topic'\n
+                                    \t\t\t};\n
+                                  \t\t\tconsole.log(params.Message.toString());\n
+                                  \t\t\tsns.publish(params, context.done);\n
+                                  \t\t\tsuccess++;\n
+                                  \t\t\treturn {\n
+                                      \t\t\t\trecordId: record.recordId,\n
+                                      \t\t\t\tresult: 'Ok',\n
+                                  \t\t\t};\n
+                              \t\t} catch (err) {\n
+                                  \t\t\tfailure++;\n
+                                  \t\t\treturn {\n
+                                      \t\t\t\trecordId: record.recordId,\n
+                                      \t\t\t\tresult: 'DeliveryFailed',\n
+                                  \t\t\t};\n
+                              \t\t}\n
+                          \t});\n
+                          \treturn { records: output };\n
+                      };\n
+                    "
       MemorySize: 128
       Timeout: 3
       Role: !GetAtt LambdaNotificationRole.Arn
@@ -438,6 +446,12 @@ Resources:
                           \"location\" VARCHAR(128),\n
                           \"ANOMALY_SCORE\"  DOUBLE,\n
                           \"ANOMALY_EXPLANATION\" VARCHAR(20480));\n
+                          -- Creates an output stream for the alerting\n
+                          CREATE OR REPLACE STREAM \"ANOMALY_SQL_STREAM\" (\n
+                              \"device_id\"      VARCHAR(32),\n
+                              \"creation_date\"  VARCHAR(20),\n
+                              \"generated_date\"  VARCHAR(20),\n
+                              \"ANOMALY_SCORE\"  DOUBLE);\n
                           \n
                           -- Compute an anomaly score for each record in the source stream\n
                           -- using Random Cut Forest\n
@@ -481,7 +495,16 @@ Resources:
                               \"ANOMALY_SCORE\", \n
                               \"ANOMALY_EXPLANATION\"\n
                           FROM \"TEMP_STREAM\"\n
-                          ORDER BY FLOOR(\"TEMP_STREAM\".ROWTIME TO SECOND), ANOMALY_SCORE DESC;\n
+                          \n
+                          -- Sort records by descending anomaly score, insert into output stream\n
+                          CREATE OR REPLACE PUMP \"ALERT_PUMP\" AS INSERT INTO \"ANOMALY_SQL_STREAM\"\n
+                              SELECT STREAM\n
+                              \"device_id\",\n
+                              TIMESTAMP_TO_CHAR('yyyy-MM-dd', \"creation_date\")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', \"creation_date\"),\n
+                              TIMESTAMP_TO_CHAR('yyyy-MM-dd', \"generated_date\")||'T'||TIMESTAMP_TO_CHAR('HH:mm:ss', \"generated_date\"),\n
+                              \"ANOMALY_SCORE\"\n
+                              FROM \"TEMP_STREAM\"\n
+                              WHERE \"ANOMALY_SCORE\" > 2;\n
                         "
       Inputs:
         - NamePrefix: "SOURCE_SQL_STREAM"
@@ -550,7 +573,7 @@ Resources:
         LambdaOutput:
           ResourceARN: !GetAtt SWLambdaNotification.Arn
           RoleARN: !GetAtt KinesisAnalyticsRole.Arn
-        Name : "DESTINATION_SQL_STREAM"
+        Name : "ANOMALY_SQL_STREAM"
 Outputs:
   ProdDataEndpoint:
     Description: "API Prod stage endpoint"
