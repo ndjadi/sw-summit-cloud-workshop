@@ -170,4 +170,10 @@ The Kinesis Data Firehose delivery stream will send data to ElasticSearch in nea
 Go to Kibana and display the dashboard.
 
 ### ...On your own
-Please follow this guide
+You'll need to deploy the stack described in "**stack/sw-stack.yml**". This CloudFormation template deploy all the components described in our architecture. All you need to provide is the S3 bucket ARN in which you would like to backup your data.
+You can deploy the CloudFormation template either from the AWS Console, or using the AWS CLI :
+
+```
+aws cloudformation create-stack --template-url https://customers-shared-files-nd.s3-eu-west-1.amazonaws.com/sierrawireless/stack/sw-stack.yml --stack-name my-new-stack-name --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+```
+
