@@ -2,12 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: AWS backend stack
 Resources:
-  SWKinesisStream:
-    Type: AWS::Kinesis::Stream
-    Properties: 
-      Name: sw-stream
-      RetentionPeriodHours: 24
-      ShardCount: 1
+  ################# SNS,ES,S3 ################
   SWSNSTopic:
     Type: AWS::SNS::Topic
     Properties: 
@@ -15,7 +10,7 @@ Resources:
       TopicName: sw-notification-topic
   S3Bucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       BucketName: !Sub 'sw-backup-bucket-${AWS::Region}-${AWS::AccountId}'
   SWElasticSearch:
@@ -44,6 +39,7 @@ Resources:
           EBSEnabled: true
           VolumeSize: 10
           VolumeType: "gp2"
+  ################# API ######################
   APIRole:
     Type: AWS::IAM::Role
     Properties:
@@ -137,45 +133,7 @@ Resources:
           Empty:
             type: "object"
             title: "Empty Schema"
-#######################################
-  # LambdaTransformerRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     AssumeRolePolicyDocument:
-  #       Version: "2012-10-17"
-  #       Statement:
-  #         -
-  #           Effect: "Allow"
-  #           Principal:
-  #             Service:
-  #               - "lambda.amazonaws.com"
-  #           Action:
-  #             - "sts:AssumeRole"
-  #     Policies:
-  #       -
-  #         PolicyName: "TransformerLogCreationPolicy"
-  #         PolicyDocument:
-  #           Version: "2012-10-17"
-  #           Statement:
-  #             -
-  #               Effect: "Allow"
-  #               Action: 
-  #                 - "logs:CreateLogGroup"
-  #               Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
-  #       -
-  #         PolicyName: "TransformerLogGenerationPolicy"
-  #         PolicyDocument:
-  #           Version: "2012-10-17"
-  #           Statement:
-  #             -
-  #               Effect: "Allow"
-  #               Action:
-  #                 - "logs:CreateLogStream"
-  #                 - "logs:PutLogEvents"
-  #               Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sw-lambda-transformer:*"
-  #     Path: "/service-role/"
-  #     RoleName: "sw-lambda-transformer-role"
-#######################################
+  ################# IAM ######################
   LambdaNotificationRole:
     Type: AWS::IAM::Role
     Properties:
@@ -217,7 +175,50 @@ Resources:
         
       Path: "/service-role/"
       RoleName: "sw-lambda-notification-role"
-#############################
+  KinesisAnalyticsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "kinesisanalytics.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: "KinesisAnalyticsPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: "ReadInputKinesis"
+                Effect: "Allow"
+                Action: 
+                  - "kinesis:DescribeStream"
+                  - "kinesis:GetShardIterator"
+                  - "kinesis:GetRecords"
+                Resource: !GetAtt SWKinesisStream.Arn
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "lambda:InvokeFunction"
+                  - "lambda:GetFunctionConfiguration"
+                Resource: 
+                  - !Join ["", [!GetAtt SWLambdaNotification.Arn, "*"]]
+              -
+                Sid: ""
+                Effect: "Allow"
+                Action: 
+                  - "firehose:*"
+                Resource: 
+                  - !GetAtt SWKinesisDeliveryStream.Arn
+      Path: "/"
+      RoleName: "sw-kinesis-analytics-role"
   KinesisDeliveryRole:
     Type: AWS::IAM::Role
     Properties:
@@ -286,8 +287,8 @@ Resources:
                 Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/%SSE_KEY_ID%"
       Path: "/"
       RoleName: "sw-kinesis-delivery-role"
-  ##########################
-  KinesisAnalyticsRole:
+  ################# Simulator ################
+  StepFunctionSimulatorRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -297,42 +298,223 @@ Resources:
             Effect: "Allow"
             Principal:
               Service:
-                - "kinesisanalytics.amazonaws.com"
+                - "states.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaRole"
+      Path: "/"
+      RoleName: "sw-stepfunction-simulator-role"
+  LambdaSimulatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
             Action:
               - "sts:AssumeRole"
       Policies:
         -
-          PolicyName: "KinesisAnalyticsPolicy"
+          PolicyName: "SimulatorLogCreationPolicy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               -
-                Sid: "ReadInputKinesis"
                 Effect: "Allow"
                 Action: 
-                  - "kinesis:DescribeStream"
-                  - "kinesis:GetShardIterator"
-                  - "kinesis:GetRecords"
-                Resource: !GetAtt SWKinesisStream.Arn
-              -
-                Sid: ""
-                Effect: "Allow"
-                Action: 
-                  - "lambda:InvokeFunction"
-                  - "lambda:GetFunctionConfiguration"
-                Resource: 
-                  - !Join ["", [!GetAtt SWLambdaNotification.Arn, "*"]]
-              -
-                Sid: ""
-                Effect: "Allow"
-                Action: 
-                  - "firehose:*"
-                Resource: 
-                  - !GetAtt SWKinesisDeliveryStream.Arn
-      Path: "/"
-      RoleName: "sw-kinesis-analytics-role"
-
-  ##########################
+                  - "logs:CreateLogGroup"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"    
+      Path: "/service-role/"
+      RoleName: "sw-lambda-simulator-role"
+  StepFunctionsSimulatorStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    DependsOn: SWLambdaSimulator
+    Properties:
+      RoleArn: !GetAtt StepFunctionSimulatorRole.Arn
+      DefinitionString: !Sub |-
+        {
+            "Comment": "Invoke Lambda every 2 seconds",
+            "StartAt": "ConfigureCount",
+            "States": {
+                "ConfigureCount": {
+                    "Type": "Pass",
+                    "Result": {
+                        "index": 0,
+                        "count": 5000,
+                        "step": 1
+                    },
+                    "ResultPath": "$.iterator",
+                    "Next": "Iterator"
+                },
+                "Iterator": {
+                    "Type": "Task",
+                    "Resource": "${SWLambdaSimulator.Arn}",
+                    "ResultPath": "$.iterator",
+                    "Next": "IsCountReached"
+                },
+                "IsCountReached": {
+                    "Type": "Choice",
+                    "Choices": [
+                        {
+                            "Variable": "$.iterator.continue",
+                            "BooleanEquals": true,
+                            "Next": "Wait"
+                        }
+                    ],
+                    "Default": "Done"
+                },
+                "Wait": {
+                    "Type": "Wait",
+                    "Seconds": 2,
+                    "Next": "Iterator"
+                },
+                "Done": {
+                    "Type": "Pass",
+                    "End": true
+                }
+            }
+        }
+      StateMachineName: "sw-stepfunction-simulator"
+  SWLambdaSimulator:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: sw-lambda-device-simulator
+      Handler: index.iterator
+      Runtime: nodejs12.x
+      InlineCode: !Sub "var https = require('https');\n
+                        const deviceId = \"lambda-device\";\n
+                        const temp_low = 30;\n
+                        const temp_high = 38;\n
+                        const acc_low = -1;\n
+                        const acc_high = 1;\n
+                        \n
+                        function generate_query() {\n
+                        \tvar light_low=parseInt(process.env.LIGHT_LOW);\n
+                        \tvar light_high=parseInt(process.env.LIGHT_HIGH);\n
+                        \t\tvar payload = {\n
+                        \t\t\t\"Data\": {\n
+                          \t\t\t\t\"deviceId\": deviceId.toString(),\n
+                          \t\t\t\t\"light\": Math.floor(Math.random() * (light_high - light_low) + light_low),\n
+                          \t\t\t\t\"accel\": {\n
+                            \t\t\t\t\t\"x\": Math.random() * (acc_high - acc_low) + acc_low,\n
+                            \t\t\t\t\t\"y\": Math.random() * (acc_high - acc_low) + acc_low,\n
+                            \t\t\t\t\t\"z\": Math.random() * (acc_high - acc_low) + acc_low,\n
+                            \t\t\t\t},\n
+                            \t\t\t\t\"temp\": Math.random() * (temp_high - temp_low) + temp_low,\n
+                            \t\t\t\t\"location\": \"48.875004,2.235794\",\n
+                            \t\t\t\t\"creationDate\": Date.now(),\n
+                            \t\t\t\t\"generatedDate\": Date.now()\n
+                            \t\t\t},\n
+                            \t\t\t\"PartitionKey\": 1\n
+                            \t\t};\n
+                            \tvar data = JSON.stringify(payload);\n
+                            \n
+                            \tconst options = {\n
+                            \t\thostname: '${DeliveryApi}.execute-api.${AWS::Region}.amazonaws.com',\n
+                            \t\tport: 443,\n
+                            \t\tpath: '/prod/streams/sw-stream/record',\n
+                            \t\tmethod: 'PUT',\n
+                            \t\theaders: {\n
+                              \t\t\t'Content-Type': 'application/json',\n
+                              \t\t\t'Content-Length': data.length\n
+                              \t\t}\n
+                              \t};\n
+                            
+                              \tconst req = https.request(options, res => {\n
+                              \n
+                              \t\tres.on('data', d => {\n
+                              \t\t\tprocess.stdout.write(d);\n
+                              \t\t});\n
+                              \t});\n
+                            \n
+                            \treq.on('error', error => {\n
+                            \t\tconsole.error(error);\n
+                            \t});\n
+                            \n
+                            \treq.write(data);\n
+                            \treq.end();\n
+                        }\n
+                        \n
+                        exports.iterator = function iterator (event, context, callback) {\n
+                        \tlet index = event.iterator.index;\n
+                        \tlet step = event.iterator.step;\n
+                        \tlet count = event.iterator.count;\n
+                            \n
+                            \tgenerate_query();\n
+                            \tindex += step;\n
+                            \n
+                            \tcallback(null, {\n
+                            \t\tindex,\n
+                            \t\tstep,\n
+                            \t\tcount,\n
+                            \t\tcontinue: index < count\n
+                            \t});\n
+                        };\n"
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          LIGHT_LOW: 1200
+          LIGHT_HIGH: 1250
+      Role: !GetAtt LambdaSimulatorRole.Arn
+  ################# LAMBDA ###################
+  SWLambdaNotification:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: sw-lambda-notification
+      Handler: index.handler
+      Runtime: nodejs12.x
+      InlineCode: !Sub " console.log('Loading function');\n
+                      var AWS = require('aws-sdk');\n
+                      var sns = new AWS.SNS();\n
+                      exports.handler = async (event, context) => {\n
+                          \tlet success = 0;\n
+                          \tlet failure = 0;\n
+                          \tconst output = event.records.map((record) => {\n
+                              \t\t/* Data is base64 encoded, so decode here */\n
+                              \t\tconst payload =Buffer.from(record.data, 'base64').toString();\n
+                              \t\tconst recordData = JSON.parse(payload);\n
+                              \t\tconsole.log(recordData.device_id.toString());\n
+                              \t\ttry {\n
+                                  \t\t\tvar params = {\n
+                                      \t\t\t\tMessage: ('Something might be wrong with ' + recordData.device_id.toString()) ,\n
+                                      \t\t\t\tSubject: 'Device Alarm',\n
+                                      \t\t\t\tTopicArn: 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:sw-notification-topic'\n
+                                    \t\t\t};\n
+                                  \t\t\tconsole.log(params.Message.toString());\n
+                                  \t\t\tsns.publish(params, context.done);\n
+                                  \t\t\tsuccess++;\n
+                                  \t\t\treturn {\n
+                                      \t\t\t\trecordId: record.recordId,\n
+                                      \t\t\t\tresult: 'Ok',\n
+                                  \t\t\t};\n
+                              \t\t} catch (err) {\n
+                                  \t\t\tfailure++;\n
+                                  \t\t\treturn {\n
+                                      \t\t\t\trecordId: record.recordId,\n
+                                      \t\t\t\tresult: 'DeliveryFailed',\n
+                                  \t\t\t};\n
+                              \t\t}\n
+                          \t});\n
+                          \treturn { records: output };\n
+                      };\n
+                    "
+      MemorySize: 128
+      Timeout: 3
+      Role: !GetAtt LambdaNotificationRole.Arn
+  ################# KINESIS ##################
+  SWKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties: 
+      Name: sw-stream
+      RetentionPeriodHours: 24
+      ShardCount: 1
   SWKinesisDeliveryStream: 
     Type: AWS::KinesisFirehose::DeliveryStream
     Properties:
@@ -372,50 +554,6 @@ Resources:
           RoleARN: !GetAtt KinesisDeliveryRole.Arn
           CloudWatchLoggingOptions: 
             Enabled: false
-  SWLambdaNotification:
-    Type: 'AWS::Serverless::Function'
-    Properties:
-      FunctionName: sw-lambda-notification
-      Handler: index.handler
-      Runtime: nodejs8.10
-      InlineCode: !Sub " console.log('Loading function');\n
-                      var AWS = require('aws-sdk');\n
-                      var sns = new AWS.SNS();\n
-                      exports.handler = async (event, context) => {\n
-                          \tlet success = 0;\n
-                          \tlet failure = 0;\n
-                          \tconst output = event.records.map((record) => {\n
-                              \t\t/* Data is base64 encoded, so decode here */\n
-                              \t\tconst payload =Buffer.from(record.data, 'base64').toString();\n
-                              \t\tconst recordData = JSON.parse(payload);\n
-                              \t\tconsole.log(recordData.device_id.toString());\n
-                              \t\ttry {\n
-                                  \t\t\tvar params = {\n
-                                      \t\t\t\tMessage: ('Something might be wrong with ' + recordData.device_id.toString()) ,\n
-                                      \t\t\t\tSubject: 'Device Alarm',\n
-                                      \t\t\t\tTopicArn: 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:sw-notification-topic'\n
-                                    \t\t\t};\n
-                                  \t\t\tconsole.log(params.Message.toString());\n
-                                  \t\t\tsns.publish(params, context.done);\n
-                                  \t\t\tsuccess++;\n
-                                  \t\t\treturn {\n
-                                      \t\t\t\trecordId: record.recordId,\n
-                                      \t\t\t\tresult: 'Ok',\n
-                                  \t\t\t};\n
-                              \t\t} catch (err) {\n
-                                  \t\t\tfailure++;\n
-                                  \t\t\treturn {\n
-                                      \t\t\t\trecordId: record.recordId,\n
-                                      \t\t\t\tresult: 'DeliveryFailed',\n
-                                  \t\t\t};\n
-                              \t\t}\n
-                          \t});\n
-                          \treturn { records: output };\n
-                      };\n
-                    "
-      MemorySize: 128
-      Timeout: 3
-      Role: !GetAtt LambdaNotificationRole.Arn
   SWKinesisDataAnalyticsApplication:
     Type: "AWS::KinesisAnalytics::Application"
     Properties:
@@ -562,18 +700,6 @@ Resources:
           ResourceARN: !GetAtt SWKinesisDeliveryStream.Arn
           RoleARN: !GetAtt KinesisAnalyticsRole.Arn
         Name : "DESTINATION_SQL_STREAM"
-  # SWKinesisDataAnalyticsNotificationOutput:
-  #   Type: "AWS::KinesisAnalytics::ApplicationOutput"
-  #   DependsOn: SWKinesisDataAnalyticsApplication
-  #   Properties:
-  #     ApplicationName: !Ref SWKinesisDataAnalyticsApplication
-  #     Output:
-  #       DestinationSchema:
-  #         RecordFormatType: "JSON"
-  #       LambdaOutput:
-  #         ResourceARN: !GetAtt SWLambdaNotification.Arn
-  #         RoleARN: !GetAtt KinesisAnalyticsRole.Arn
-  #       Name : "ANOMALY_SQL_STREAM"
 Outputs:
   ProdDataEndpoint:
     Description: "API Prod stage endpoint"
