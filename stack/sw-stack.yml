@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AWS backend stack
+Description: AWS backend stack for SW workshop
 Resources:
   ################# SNS,ES,S3 ################
   SWSNSTopic:
@@ -244,8 +244,8 @@ Resources:
                 Action: 
                   - "s3:*"
                 Resource:
-                  - !GetAtt S3Bucket.Arn #"arn:aws:s3:::customers-shared-files-nd-sw"     # parameterize
-                  - !Join ["/", [!GetAtt S3Bucket.Arn, "*"]] #"arn:aws:s3:::customers-shared-files-nd-sw/*"     # parameterize
+                  - !GetAtt S3Bucket.Arn
+                  - !Join ["/", [!GetAtt S3Bucket.Arn, "*"]]
               -
                 Sid: ""
                 Effect: "Allow"
