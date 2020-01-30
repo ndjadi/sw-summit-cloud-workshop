@@ -65,7 +65,7 @@ Here's a code sample :
 ```javascript
 function(event) {
   var deviceId = event.path.split("/")[3];
-  var location = event.location.lat.toString() + "," + event.location.lon.toString();
+  var location = "43.6043,1.4437";
   var payload = {
     "Data": {
       "deviceId": deviceId.toString(),
