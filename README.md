@@ -89,7 +89,7 @@ function(event) {
   };
 
   return {
-    "<replace_with_your_stream": [new_event],
+    "/sierra_devprogram/aws_output": [new_event],
   }
 }
 ```
