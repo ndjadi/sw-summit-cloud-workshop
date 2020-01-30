@@ -245,7 +245,8 @@ Follow this guide https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-conf
 #### 2. Deploy the CloudFormation Template :
 Simply execute the following command :
 ```
-aws cloudformation create-stack --template-url https://customers-shared-files-nd.s3-eu-west-1.amazonaws.com/sierrawireless/stack/sw-stack.yml --stack-name my-new-stack-name --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+git clone https://github.com/ndjadi/sw-summit-cloud-workshop
+aws cloudformation create-stack --template-body file://sw-summit-cloud-workshop/stack/sw-stack.yml --stack-name sw-stack --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
 ```
 #### 3. Start the Kinesis Data Analytics application :
 Navigate to Amazon Kinesis in the AWS Console and start the "**sw-kinesis-data-analytics**" application.
