@@ -35,16 +35,19 @@ An edge action to aggregate different observations in the same event is required
 Here's a code sample :
 ```javascript
 function(event) {
+    
     // Reads a value from the light sensor right away
-    var light = Datahub.read("/redSensor/light/value", 0);
+    var light = Datahub.read("/light/value", 0);
     light = light ? light.value : null;
 
     // reading a new value from the accelerometer sensor
-    var accel = Datahub.read("/redSensor/accel/value", 0);
+    var accel = Datahub.read("/imu/accel/value", 0);
     accel = accel ? accel.value : null;
+
     // reading value from the temperature sensor
-    var temp = Datahub.read("/redSensor/imu/temp/value", 0);
+    var temp = Datahub.read("/imu/temp/value", 0);
     temp = temp ? temp.value : null;
+
     return {
       // Sends immediately to the cloud, into stream "/company/devices/device/:default")
       "cl://" : [{
